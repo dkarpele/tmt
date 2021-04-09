@@ -324,8 +324,25 @@ def export_to_nitrate(test):
     # Saving case.notes with edited StructField
     nitrate_case.notes = struct_field.save()
 
-    # Export manual test instructions from test.md to nitrate as html
-    md_path = os.getcwd() + '/test.md'
+    # Export manual test instructions from *.md file to nitrate as html
+    files = '\n'.join(os.listdir())
+    reg_exp = r'.+\.md'
+    num_md_files = len(re.findall(reg_exp, files))
+    fail_message = "in the current working directory.\n" \
+                   "Manual steps couldn't be exported"
+
+    if num_md_files == 1:
+        md_path = os.getcwd() + '/' + \
+                  re.search(reg_exp, files).group(0)
+    elif num_md_files == 0:
+        md_path = ''
+        echo((style(f'Markdown files don\'t exist {fail_message}',
+                    fg='yellow')))
+    else:
+        md_path = ''
+        echo((style(f'{num_md_files} Markdown files found {fail_message}',
+                    fg='yellow')))
+
     if os.path.exists(md_path):
         step, expect, setup, cleanup = convert_manual_to_nitrate(md_path)
         nitrate.User()._server.TestCase.store_text(
