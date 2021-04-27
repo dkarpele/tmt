@@ -40,6 +40,18 @@ EXTRA_TEST_KEYS = (
     "relevancy extra-nitrate extra-hardware extra-pepa "
     "extra-summary extra-task".split())
 
+SECTIONS_HEADINGS = {
+    'Setup':   ['<h1>Setup</h1>'],
+    'Test':    ['<h1>Test</h1>',
+                '<h1>Test .*</h1>'],
+    'Step':    ['<h2>Step</h2>',
+                '<h2>Test Step</h2>'],
+    'Expect':  ['<h2>Expect</h2>',
+                '<h2>Result</h2>',
+                '<h2>Expected Result</h2>'],
+    'Cleanup': ['<h1>Cleanup</h1>']
+    }
+
 
 class Node(tmt.utils.Common):
     """
@@ -361,6 +373,143 @@ class Test(Node):
                 if value not in [None, list(), dict()]:
                     echo(tmt.utils.format(key, value, key_color='blue'))
 
+    @staticmethod
+    def check_md_file_respects_spec(md_path):
+        warnings_list = []
+
+        required_headings = set(SECTIONS_HEADINGS['Step'] +
+                                SECTIONS_HEADINGS['Expect'])
+        values = []
+        for _ in list(SECTIONS_HEADINGS.values()):
+            values += _
+
+        md_to_html = tmt.utils.markdown_to_html(md_path)
+        html_headings_from_file = [i[0] for i in
+                                   re.findall('(^<h[1-4]>(.+?)</h[1-4]>$)',
+                                              md_to_html,
+                                              re.M)]
+
+        # No invalid headings in the file w/o headings
+        if not html_headings_from_file:
+            invalid_headings = []
+        else:
+            # Find invalid headings in the file
+            invalid_headings = [key for key in set(html_headings_from_file)
+                                if (key not in values) !=
+                                bool(re.search(
+                                    SECTIONS_HEADINGS['Test'][1], key))]
+
+        # Remove invalid headings from html_headings_from_file
+        for index in invalid_headings:
+            warnings_list.append(f'unknown html heading "{index}" is used')
+            html_headings_from_file = [i for i in html_headings_from_file
+                                       if i != index]
+
+        def count_html_headings(heading):
+            if html_headings_from_file.count(heading) > 1:
+                warnings_list.append(f'{html_headings_from_file.count(heading)}'
+                                     f' headings "{heading}" are used')
+
+        # Warn if 2 or more # Setup or # Cleanup are used
+        count_html_headings(SECTIONS_HEADINGS['Setup'][0])
+        count_html_headings(SECTIONS_HEADINGS['Cleanup'][0])
+
+        warn_outside_test_section = 'Heading "{}" from the section "{}" is '\
+                                    'used \noutside of Test sections.'
+        warn_headings_not_in_pairs = 'The number of headings from the section' \
+                                     ' "Step" - {}\ndoesn\'t equal to the ' \
+                                     'number of headings from the section \n' \
+                                     '"Expect" - {} in the test section "{}"'
+        warn_required_section_is_absent = '"{}" section doesn\'t exist in ' \
+                                          'the Markdown file'
+        warn_unexpected_headings = 'Headings "{}" aren\'t expected in the ' \
+                                   'section "{}"'
+
+        def required_section_exists(section, section_name, prefix):
+            res = list(filter(
+                lambda t: t.startswith(prefix), section))
+            if not res:
+                warnings_list.append(
+                    warn_required_section_is_absent.format(section_name))
+                return 0
+            else:
+                return len(res)
+
+        # Required sections don't exist
+        if not required_section_exists(html_headings_from_file,
+                                       'Test',
+                                       '<h1>Test'):
+            return warnings_list
+
+        # Remove Optional heading #Cleanup if it's in the end of document
+        if html_headings_from_file[-1] == '<h1>Cleanup</h1>':
+            html_headings_from_file.pop()
+            # Add # Test heading to close the file
+            html_headings_from_file.append(SECTIONS_HEADINGS['Test'][0])
+
+        index = 0
+        while html_headings_from_file:
+            # # Step cannot be used outside of test sections.
+            if html_headings_from_file[index] == \
+                    SECTIONS_HEADINGS['Step'][0] or \
+                    html_headings_from_file[index] == \
+                    SECTIONS_HEADINGS['Step'][1]:
+                warnings_list.append(warn_outside_test_section.format(
+                    html_headings_from_file[index], 'Step'))
+
+            # # Expect cannot be used outside of test sections.
+            if html_headings_from_file[index] == \
+                    SECTIONS_HEADINGS['Expect'][0] or \
+                    html_headings_from_file[index] == \
+                    SECTIONS_HEADINGS['Expect'][1] or \
+                    html_headings_from_file[index] == \
+                    SECTIONS_HEADINGS['Expect'][2]:
+                warnings_list.append(warn_outside_test_section.format(
+                    html_headings_from_file[index], 'Expect'))
+
+            if html_headings_from_file[index].startswith('<h1>Test'):
+                test_section_name = html_headings_from_file[index]
+                try:
+                    html_headings_from_file[index + 1]
+                except IndexError:
+                    break
+                for i, v in enumerate(html_headings_from_file[index + 1:]):
+                    if re.search('^<h1>(Test .*|Test)</h1>$', v):
+                        test_section = html_headings_from_file[index + 1:
+                                                               index + 1 + i]
+
+                        # Unexpected headings inside Test section
+                        unexpected_headings = set(test_section) - \
+                                              required_headings
+                        if unexpected_headings:
+                            warnings_list.append(
+                                warn_unexpected_headings.
+                                format(', '.join(unexpected_headings),
+                                       test_section_name))
+
+                        amount_of_steps = required_section_exists(
+                            test_section,
+                            'Step',
+                            tuple(SECTIONS_HEADINGS['Step']))
+                        amount_of_expects = required_section_exists(
+                            test_section,
+                            'Expect',
+                            tuple(SECTIONS_HEADINGS['Expect']))
+
+                        # # Step isn't in pair with # Expect
+                        if amount_of_steps != amount_of_expects != 0:
+                            warnings_list.append(warn_headings_not_in_pairs.
+                                                 format(amount_of_steps,
+                                                        amount_of_expects,
+                                                        test_section_name))
+                        index += i
+                        break
+
+            index += 1
+            if index >= len(html_headings_from_file) - 1:
+                break
+        return warnings_list
+
     def lint(self):
         """
         Check test against the L1 metadata specification.
@@ -407,6 +556,18 @@ class Test(Node):
                 verdict(False, f"unknown attribute '{key}' is used")
         else:
             verdict(True, "correct attributes are used")
+
+        # Check if the format of Markdown file respects the specification
+        # https://tmt.readthedocs.io/en/latest/spec/tests.html#manual
+        md_path = tmt.export.return_markdown_file()
+        if os.path.exists(md_path):
+            invalid_md_file = Test.check_md_file_respects_spec(md_path)
+            if invalid_md_file:
+                for i in invalid_md_file:
+                    verdict(False, i)
+            else:
+                verdict(True, "correct headings are used in the Markdown file")
+
         return valid
 
     def export(self, format_='yaml', keys=None):

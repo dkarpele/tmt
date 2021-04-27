@@ -72,16 +72,12 @@ def convert_manual_to_nitrate(test_md):
     as html strings.
     """
 
-    sections_headings = {
-        '<h1>Setup</h1>': [],
-        '<h1>Test</h1>': [],
-        '<h1>Test .*</h1>': [],
-        '<h2>Step</h2>': [],
-        '<h2>Test Step</h2>': [],
-        '<h2>Expect</h2>': [],
-        '<h2>Result</h2>': [],
-        '<h2>Expected Result</h2>': [],
-        '<h1>Cleanup</h1>': []}
+    values = []
+    sections_headings = {}
+    for _ in list(tmt.base.SECTIONS_HEADINGS.values()):
+        values += _
+    for _ in values:
+        sections_headings[_] = []
 
     html = markdown_to_html(test_md)
     html_splitlines = html.splitlines()
@@ -325,24 +321,7 @@ def export_to_nitrate(test):
     nitrate_case.notes = struct_field.save()
 
     # Export manual test instructions from *.md file to nitrate as html
-    files = '\n'.join(os.listdir())
-    reg_exp = r'.+\.md'
-    num_md_files = len(re.findall(reg_exp, files))
-    fail_message = "in the current working directory.\n" \
-                   "Manual steps couldn't be exported"
-
-    if num_md_files == 1:
-        md_path = os.getcwd() + '/' + \
-                  re.search(reg_exp, files).group(0)
-    elif num_md_files == 0:
-        md_path = ''
-        echo((style(f'Markdown files don\'t exist {fail_message}',
-                    fg='yellow')))
-    else:
-        md_path = ''
-        echo((style(f'{num_md_files} Markdown files found {fail_message}',
-                    fg='yellow')))
-
+    md_path = return_markdown_file()
     if os.path.exists(md_path):
         step, expect, setup, cleanup = convert_manual_to_nitrate(md_path)
         nitrate.User()._server.TestCase.store_text(
@@ -369,6 +348,27 @@ def export_to_nitrate(test):
     nitrate_case.update()
     echo(style("Test case '{0}' successfully exported to nitrate.".format(
         nitrate_case.identifier), fg='magenta'))
+
+
+def return_markdown_file():
+    """ Return path to the markdown file """
+    files = '\n'.join(os.listdir())
+    reg_exp = r'.+\.md'
+    num_md_files = len(re.findall(reg_exp, files))
+    fail_message = "in the current working directory.\n" \
+                   "Manual steps couldn't be exported"
+    if num_md_files == 1:
+        md_path = os.getcwd() + '/' + \
+                  re.search(reg_exp, files).group(0)
+    elif num_md_files == 0:
+        md_path = ''
+        echo((style(f'Markdown file doesn\'t exist {fail_message}',
+                    fg='yellow')))
+    else:
+        md_path = ''
+        echo((style(f'{num_md_files} Markdown files found {fail_message}',
+                    fg='yellow')))
+    return md_path
 
 
 def create_nitrate_case(test):
